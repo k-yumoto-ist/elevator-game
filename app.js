@@ -1,7 +1,7 @@
 const floors = ["B1", ...Array.from({ length: 39 }, (_, index) => String(index + 1))];
-const doorOpenMs = 1600;
-const doorMoveMs = 320;
-const doorClosingAnnounceLeadMs = 650;
+const doorOpenMs = 3600;
+const doorMoveMs = 520;
+const doorClosingAnnounceLeadMs = 1400;
 
 const state = {
   current: 1,
@@ -89,7 +89,7 @@ function speak(text) {
   window.speechSynthesis.cancel();
   const utterance = new window.SpeechSynthesisUtterance(text);
   utterance.lang = "ja-JP";
-  utterance.rate = 1;
+  utterance.rate = 0.95;
   utterance.pitch = 1;
   utterance.volume = 1;
   window.speechSynthesis.speak(utterance);
@@ -105,7 +105,7 @@ function announceTravelStart(direction) {
 
 function announceArrival(floor) {
   playArrivalChime();
-  window.setTimeout(() => speak(`${floorSpeechLabel(floor)}です`), 260);
+  window.setTimeout(() => speak(`${floorSpeechLabel(floor)}です`), 350);
 }
 
 function announceDoorClosing() {

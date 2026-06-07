@@ -5,7 +5,8 @@ const doorMoveMs = 320;
 const state = {
   current: 1,
   target: null,
-  queue: [],
+  requests: new Set(),
+  direction: 0,
   moving: false,
   doorsOpen: false,
   runId: 0,
@@ -38,6 +39,42 @@ function clearDoorTimer() {
   }
 }
 
+function hasRequests() {
+  return state.requests.size > 0;
+}
+
+function sortedRequests() {
+  return [...state.requests].sort((a, b) => a - b);
+}
+
+function pickNextTarget() {
+  const requests = sortedRequests();
+  if (requests.length === 0) return null;
+
+  if (state.direction > 0) {
+    const upward = requests.find((floor) => floor > state.current);
+    if (upward !== undefined) return upward;
+    state.direction = -1;
+    return requests.filter((floor) => floor < state.current).pop() ?? requests[0];
+  }
+
+  if (state.direction < 0) {
+    const downward = requests.filter((floor) => floor < state.current).pop();
+    if (downward !== undefined) return downward;
+    state.direction = 1;
+    return requests.find((floor) => floor > state.current) ?? requests[requests.length - 1];
+  }
+
+  const nearest = requests.reduce((best, floor) => {
+    const bestDistance = Math.abs(best - state.current);
+    const floorDistance = Math.abs(floor - state.current);
+    if (floorDistance !== bestDistance) return floorDistance < bestDistance ? floor : best;
+    return floor > state.current ? floor : best;
+  }, requests[0]);
+  state.direction = Math.sign(nearest - state.current);
+  return nearest;
+}
+
 function scheduleAutoClose(runId, continueAfterClose = false) {
   clearDoorTimer();
   state.doorTimer = window.setTimeout(() => {
@@ -61,17 +98,34 @@ function addTarget(floor) {
     return;
   }
 
-  if (state.target === next || state.queue.includes(next)) {
-    return;
+  if (state.target === next || state.requests.has(next)) return;
+
+  if (state.moving && state.target !== null) {
+    if (next === state.current) {
+      state.requests.add(state.target);
+      state.target = next;
+      render();
+      return;
+    }
+
+    const isAheadOnUp = state.target > state.current && next > state.current && next < state.target;
+    const isAheadOnDown = state.target < state.current && next < state.current && next > state.target;
+    if (isAheadOnUp || isAheadOnDown) {
+      state.requests.add(state.target);
+      state.target = next;
+      state.direction = Math.sign(state.target - state.current);
+      render();
+      return;
+    }
   }
 
-  state.queue.push(next);
+  state.requests.add(next);
   render();
   startNextTarget();
 }
 
 async function startNextTarget(runId = state.runId) {
-  if (state.moving || state.target !== null || state.queue.length === 0) return;
+  if (state.moving || state.target !== null || !hasRequests()) return;
 
   state.runId = runId === state.runId ? state.runId + 1 : state.runId;
   const activeRunId = state.runId;
@@ -83,7 +137,15 @@ async function startNextTarget(runId = state.runId) {
     if (activeRunId !== state.runId) return;
   }
 
-  state.target = state.queue.shift();
+  state.target = pickNextTarget();
+  if (state.target === null) {
+    state.direction = 0;
+    render();
+    return;
+  }
+
+  state.requests.delete(state.target);
+  state.direction = Math.sign(state.target - state.current) || state.direction;
   render();
   moveToTarget(activeRunId);
 }
@@ -101,7 +163,10 @@ async function moveToTarget(runId) {
 
   state.moving = false;
   state.target = null;
-  openDoors(true, state.queue.length > 0);
+  if (!hasRequests()) {
+    state.direction = 0;
+  }
+  openDoors(true, hasRequests());
 }
 
 function openDoors(autoClose = true, continueAfterClose = false) {
@@ -125,21 +190,22 @@ function resetElevator() {
   clearDoorTimer();
   state.current = 1;
   state.target = null;
-  state.queue = [];
+  state.requests.clear();
+  state.direction = 0;
   state.doorsOpen = false;
   render();
 }
 
-function queuedFloors() {
-  return new Set([state.target, ...state.queue].filter((floor) => floor !== null));
+function requestedFloors() {
+  return new Set([state.target, ...state.requests].filter((floor) => floor !== null));
 }
 
 function renderFloors() {
-  const queued = queuedFloors();
+  const requested = requestedFloors();
   elements.floorStack.innerHTML = floors
     .map(
       (label, index) => `
-        <div class="floor-row ${index === state.current ? "is-current" : ""} ${queued.has(index) ? "is-target" : ""}">
+        <div class="floor-row ${index === state.current ? "is-current" : ""} ${requested.has(index) ? "is-target" : ""}">
           <span>${label}</span>
           <span class="floor-line"></span>
         </div>
@@ -149,13 +215,13 @@ function renderFloors() {
 }
 
 function renderButtons() {
-  const queued = queuedFloors();
+  const requested = requestedFloors();
   elements.floorButtons.innerHTML = floors
     .slice()
     .reverse()
     .map((label) => {
       const index = floors.indexOf(label);
-      return `<button class="floor-button ${queued.has(index) ? "is-active" : ""}" type="button" data-floor="${index}">${label}</button>`;
+      return `<button class="floor-button ${requested.has(index) ? "is-active" : ""}" type="button" data-floor="${index}">${label}</button>`;
     })
     .join("");
 }
@@ -163,8 +229,8 @@ function renderButtons() {
 function render() {
   const maxTravel = Math.max(0, elements.car.parentElement.clientHeight - elements.car.clientHeight - 10);
   const progress = state.current / (floors.length - 1);
-  const direction = state.target === null ? 0 : Math.sign(state.target - state.current);
-  const queuedLabels = state.queue.map(floorLabel);
+  const moveDirection = state.target === null ? state.direction : Math.sign(state.target - state.current);
+  const requestLabels = sortedRequests().map(floorLabel);
 
   elements.car.style.bottom = `${progress * maxTravel + 5}px`;
   elements.car.classList.toggle("doors-open", state.doorsOpen);
@@ -173,22 +239,22 @@ function render() {
   elements.screenFloor.textContent = floorLabel(state.current);
   elements.carDisplay.textContent = floorLabel(state.current);
   elements.targetFloor.textContent =
-    state.target === null ? (queuedLabels.length > 0 ? queuedLabels.join(", ") : "なし") : floorLabel(state.target);
+    state.target === null ? (requestLabels.length > 0 ? requestLabels.join(", ") : "なし") : floorLabel(state.target);
   elements.motionState.textContent = state.moving ? "移動中" : state.doorsOpen ? "ドア開" : "待機中";
-  elements.direction.textContent = direction > 0 ? "▲" : direction < 0 ? "▼" : "・";
+  elements.direction.textContent = moveDirection > 0 ? "▲" : moveDirection < 0 ? "▼" : "・";
   elements.screenHint.textContent = state.moving
     ? `${floorLabel(state.target)}へ移動中`
     : state.doorsOpen
-      ? state.queue.length > 0
+      ? hasRequests()
         ? "ドアが閉まると次へ向かいます"
         : "ドアが開いています"
-      : state.queue.length > 0
-        ? `次: ${floorLabel(state.queue[0])}`
+      : hasRequests()
+        ? `予約: ${requestLabels.join(", ")}`
         : "階数ボタンを押してください";
 
   elements.openDoor.disabled = state.moving || state.doorsOpen;
   elements.closeDoor.disabled = state.moving || !state.doorsOpen;
-  elements.resetElevator.disabled = state.moving || (state.current === 1 && state.queue.length === 0);
+  elements.resetElevator.disabled = state.moving || (state.current === 1 && !hasRequests());
 
   renderFloors();
   renderButtons();
@@ -200,9 +266,9 @@ elements.floorButtons.addEventListener("click", (event) => {
   addTarget(button.dataset.floor);
 });
 
-elements.openDoor.addEventListener("click", () => openDoors(true, state.queue.length > 0));
+elements.openDoor.addEventListener("click", () => openDoors(true, hasRequests()));
 elements.closeDoor.addEventListener("click", () => {
-  const shouldContinue = state.queue.length > 0 && state.target === null;
+  const shouldContinue = hasRequests() && state.target === null;
   closeDoors();
   if (shouldContinue) {
     window.setTimeout(() => startNextTarget(), doorMoveMs);

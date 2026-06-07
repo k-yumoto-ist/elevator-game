@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Elevator B1-39</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <main class="game-shell">
+      <section class="elevator-view" aria-label="エレベーター">
+        <div class="status-strip">
+          <div>
+            <span class="label">現在階</span>
+            <strong id="currentFloor">1</strong>
+          </div>
+          <div>
+            <span class="label">行き先</span>
+            <strong id="targetFloor">なし</strong>
+          </div>
+          <div>
+            <span class="label">状態</span>
+            <strong id="motionState">待機中</strong>
+          </div>
+        </div>
+
+        <div class="scene">
+          <div class="floor-stack" id="floorStack" aria-hidden="true"></div>
+          <div class="shaft">
+            <div class="cables"></div>
+            <div class="car" id="car">
+              <div class="car-display" id="carDisplay">1</div>
+              <div class="door left-door"></div>
+              <div class="door right-door"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <aside class="control-panel" aria-label="操作パネル">
+        <div class="panel-screen">
+          <span id="direction">・</span>
+          <strong id="screenFloor">1</strong>
+          <small id="screenHint">階数ボタンを押してください</small>
+        </div>
+
+        <div class="door-controls" aria-label="ドア操作">
+          <button id="openDoor" class="wide-button" type="button">開く</button>
+          <button id="closeDoor" class="wide-button" type="button">閉じる</button>
+        </div>
+
+        <div class="floor-buttons" id="floorButtons" aria-label="階数ボタン"></div>
+
+        <button id="resetElevator" class="reset-button" type="button">1階に戻す</button>
+      </aside>
+    </main>
+
+    <script src="./app.js"></script>
+  </body>
+</html>

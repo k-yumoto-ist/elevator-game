@@ -15,6 +15,10 @@ const state = {
   doorTimer: null,
   doorSpeechTimer: null,
   audioContext: null,
+  speechVoice: null,
+  speechQueue: [],
+  speechSpeaking: false,
+  speechRetryTimer: null,
 };
 
 const elements = {
@@ -58,6 +62,30 @@ function ensureAudioContext() {
   return state.audioContext;
 }
 
+function chooseJapaneseVoice() {
+  if (!("speechSynthesis" in window) || typeof window.speechSynthesis.getVoices !== "function") return null;
+  const voices = window.speechSynthesis.getVoices();
+  if (voices.length === 0) return null;
+  return (
+    voices.find((voice) => voice.lang === "ja-JP") ||
+    voices.find((voice) => voice.lang.toLowerCase().startsWith("ja")) ||
+    voices.find((voice) => voice.name.toLowerCase().includes("japanese")) ||
+    null
+  );
+}
+
+function prepareSpeechSynthesis() {
+  if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) return false;
+  state.speechVoice = chooseJapaneseVoice();
+  window.speechSynthesis.resume();
+  return true;
+}
+
+function unlockSound() {
+  ensureAudioContext();
+  prepareSpeechSynthesis();
+}
+
 function playTone(frequency, duration, volume = 0.06, delay = 0) {
   const audioContext = ensureAudioContext();
   if (!audioContext) return;
@@ -86,13 +114,41 @@ function playArrivalChime() {
 
 function speak(text) {
   if (!canUseAudio() || !("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) return;
-  window.speechSynthesis.cancel();
+  prepareSpeechSynthesis();
+  state.speechQueue.push(text);
+  flushSpeechQueue();
+}
+
+function flushSpeechQueue() {
+  if (!canUseAudio() || state.speechSpeaking || state.speechQueue.length === 0) return;
+  if (!prepareSpeechSynthesis()) return;
+
+  if (state.speechRetryTimer !== null) {
+    window.clearTimeout(state.speechRetryTimer);
+    state.speechRetryTimer = null;
+  }
+
+  const text = state.speechQueue.shift();
   const utterance = new window.SpeechSynthesisUtterance(text);
   utterance.lang = "ja-JP";
   utterance.rate = 0.95;
   utterance.pitch = 1;
   utterance.volume = 1;
+  if (state.speechVoice !== null) {
+    utterance.voice = state.speechVoice;
+  }
+  utterance.onend = () => {
+    state.speechSpeaking = false;
+    flushSpeechQueue();
+  };
+  utterance.onerror = () => {
+    state.speechSpeaking = false;
+    state.speechRetryTimer = window.setTimeout(flushSpeechQueue, 180);
+  };
+  state.speechSpeaking = true;
+  window.speechSynthesis.resume();
   window.speechSynthesis.speak(utterance);
+  window.setTimeout(() => window.speechSynthesis.resume(), 80);
 }
 
 function announceTravelStart(direction) {
@@ -177,6 +233,7 @@ function scheduleAutoClose(runId, continueAfterClose = false) {
 function addTarget(floor) {
   const next = Number(floor);
   if (Number.isNaN(next)) return;
+  unlockSound();
   playButtonSound();
 
   if (next === state.current && !state.moving) {
@@ -365,22 +422,42 @@ elements.floorButtons.addEventListener("click", (event) => {
   addTarget(button.dataset.floor);
 });
 
-elements.openDoor.addEventListener("click", () => openDoors(true, hasRequests()));
+elements.openDoor.addEventListener("click", () => {
+  unlockSound();
+  openDoors(true, hasRequests());
+});
 elements.closeDoor.addEventListener("click", () => {
+  unlockSound();
   const shouldContinue = hasRequests() && state.target === null;
   closeDoors();
   if (shouldContinue) {
     window.setTimeout(() => startNextTarget(), doorMoveMs);
   }
 });
-elements.resetElevator.addEventListener("click", resetElevator);
+elements.resetElevator.addEventListener("click", () => {
+  unlockSound();
+  resetElevator();
+});
 elements.soundToggle.addEventListener("click", () => {
   state.soundEnabled = !state.soundEnabled;
   if (!state.soundEnabled && "speechSynthesis" in window) {
+    state.speechQueue = [];
+    state.speechSpeaking = false;
     window.speechSynthesis.cancel();
+  } else {
+    unlockSound();
+    speak("音声をオンにしました");
   }
   render();
 });
 window.addEventListener("resize", render);
+
+if ("speechSynthesis" in window) {
+  window.speechSynthesis.onvoiceschanged = () => {
+    state.speechVoice = chooseJapaneseVoice();
+    flushSpeechQueue();
+  };
+  prepareSpeechSynthesis();
+}
 
 render();

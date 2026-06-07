@@ -1,4 +1,6 @@
 const floors = ["B1", ...Array.from({ length: 39 }, (_, index) => String(index + 1))];
+const doorOpenMs = 1600;
+const doorMoveMs = 320;
 
 const state = {
   current: 1,
@@ -6,6 +8,7 @@ const state = {
   moving: false,
   doorsOpen: false,
   runId: 0,
+  doorTimer: null,
 };
 
 const elements = {
@@ -27,23 +30,46 @@ const elements = {
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const floorLabel = (index) => floors[index];
 
-function setTarget(floor) {
+function clearDoorTimer() {
+  if (state.doorTimer !== null) {
+    window.clearTimeout(state.doorTimer);
+    state.doorTimer = null;
+  }
+}
+
+function scheduleAutoClose(runId) {
+  clearDoorTimer();
+  state.doorTimer = window.setTimeout(() => {
+    if (runId !== state.runId || state.moving) return;
+    closeDoors();
+  }, doorOpenMs);
+}
+
+async function setTarget(floor) {
   const next = Number(floor);
   if (Number.isNaN(next) || state.moving) return;
 
   state.runId += 1;
+  clearDoorTimer();
   state.target = next;
-  state.doorsOpen = false;
+
+  if (next === state.current) {
+    state.target = null;
+    openDoors(true);
+    return;
+  }
+
+  if (state.doorsOpen) {
+    closeDoors(false);
+    await sleep(doorMoveMs);
+  }
+
   render();
   moveToTarget(state.runId);
 }
 
 async function moveToTarget(runId) {
-  if (state.target === null || state.target === state.current) {
-    state.target = null;
-    render();
-    return;
-  }
+  if (state.target === null || state.target === state.current) return;
 
   state.moving = true;
   while (state.current !== state.target) {
@@ -55,16 +81,20 @@ async function moveToTarget(runId) {
 
   state.moving = false;
   state.target = null;
-  render();
+  openDoors(true);
 }
 
-function openDoors() {
+function openDoors(autoClose = true) {
   if (state.moving) return;
   state.doorsOpen = true;
   render();
+  if (autoClose) {
+    scheduleAutoClose(state.runId);
+  }
 }
 
-function closeDoors() {
+function closeDoors(cancelTimer = true) {
+  if (cancelTimer) clearDoorTimer();
   state.doorsOpen = false;
   render();
 }
@@ -72,6 +102,7 @@ function closeDoors() {
 function resetElevator() {
   if (state.moving) return;
   state.runId += 1;
+  clearDoorTimer();
   state.current = 1;
   state.target = null;
   state.doorsOpen = false;
@@ -136,8 +167,8 @@ elements.floorButtons.addEventListener("click", (event) => {
   setTarget(button.dataset.floor);
 });
 
-elements.openDoor.addEventListener("click", openDoors);
-elements.closeDoor.addEventListener("click", closeDoors);
+elements.openDoor.addEventListener("click", () => openDoors(true));
+elements.closeDoor.addEventListener("click", () => closeDoors());
 elements.resetElevator.addEventListener("click", resetElevator);
 window.addEventListener("resize", render);
 

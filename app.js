@@ -19,6 +19,7 @@ const state = {
   speechQueue: [],
   speechSpeaking: false,
   speechRetryTimer: null,
+  speechWatchdogTimer: null,
 };
 
 const elements = {
@@ -49,6 +50,10 @@ function canUseAudio() {
   return state.soundEnabled;
 }
 
+function getSpeechUtteranceCtor() {
+  return window.SpeechSynthesisUtterance || globalThis.SpeechSynthesisUtterance || null;
+}
+
 function ensureAudioContext() {
   if (!canUseAudio()) return null;
   const AudioContext = window.AudioContext || window.webkitAudioContext;
@@ -68,14 +73,15 @@ function chooseJapaneseVoice() {
   if (voices.length === 0) return null;
   return (
     voices.find((voice) => voice.lang === "ja-JP") ||
-    voices.find((voice) => voice.lang.toLowerCase().startsWith("ja")) ||
-    voices.find((voice) => voice.name.toLowerCase().includes("japanese")) ||
+    voices.find((voice) => voice.lang?.toLowerCase().startsWith("ja")) ||
+    voices.find((voice) => voice.name?.toLowerCase().includes("japanese")) ||
+    voices.find((voice) => voice.localService) ||
     null
   );
 }
 
 function prepareSpeechSynthesis() {
-  if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) return false;
+  if (!("speechSynthesis" in window) || getSpeechUtteranceCtor() === null) return false;
   state.speechVoice = chooseJapaneseVoice();
   window.speechSynthesis.resume();
   return true;
@@ -112,8 +118,21 @@ function playArrivalChime() {
   playTone(880, 0.2, 0.05, 0.14);
 }
 
+function clearSpeechWatchdog() {
+  if (state.speechWatchdogTimer !== null) {
+    window.clearTimeout(state.speechWatchdogTimer);
+    state.speechWatchdogTimer = null;
+  }
+}
+
+function finishCurrentSpeech() {
+  clearSpeechWatchdog();
+  state.speechSpeaking = false;
+  flushSpeechQueue();
+}
+
 function speak(text) {
-  if (!canUseAudio() || !("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) return;
+  if (!canUseAudio() || !("speechSynthesis" in window) || getSpeechUtteranceCtor() === null) return;
   prepareSpeechSynthesis();
   state.speechQueue.push(text);
   flushSpeechQueue();
@@ -128,27 +147,33 @@ function flushSpeechQueue() {
     state.speechRetryTimer = null;
   }
 
+  const SpeechUtterance = getSpeechUtteranceCtor();
+  if (SpeechUtterance === null) return;
+
   const text = state.speechQueue.shift();
-  const utterance = new window.SpeechSynthesisUtterance(text);
+  const utterance = new SpeechUtterance(text);
   utterance.lang = "ja-JP";
-  utterance.rate = 0.95;
+  utterance.rate = 0.9;
   utterance.pitch = 1;
   utterance.volume = 1;
   if (state.speechVoice !== null) {
     utterance.voice = state.speechVoice;
   }
-  utterance.onend = () => {
-    state.speechSpeaking = false;
-    flushSpeechQueue();
-  };
+  utterance.onend = finishCurrentSpeech;
   utterance.onerror = () => {
     state.speechSpeaking = false;
-    state.speechRetryTimer = window.setTimeout(flushSpeechQueue, 180);
+    clearSpeechWatchdog();
+    state.speechRetryTimer = window.setTimeout(flushSpeechQueue, 220);
   };
+
   state.speechSpeaking = true;
   window.speechSynthesis.resume();
   window.speechSynthesis.speak(utterance);
   window.setTimeout(() => window.speechSynthesis.resume(), 80);
+  window.setTimeout(() => window.speechSynthesis.resume(), 250);
+
+  const watchdogMs = Math.max(1800, text.length * 230);
+  state.speechWatchdogTimer = window.setTimeout(finishCurrentSpeech, watchdogMs);
 }
 
 function announceTravelStart(direction) {
@@ -443,6 +468,7 @@ elements.soundToggle.addEventListener("click", () => {
   if (!state.soundEnabled && "speechSynthesis" in window) {
     state.speechQueue = [];
     state.speechSpeaking = false;
+    clearSpeechWatchdog();
     window.speechSynthesis.cancel();
   } else {
     unlockSound();

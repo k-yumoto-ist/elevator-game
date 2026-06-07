@@ -1,63 +1,72 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="ja">
   <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#20252a" />
-    <title>Elevator B1-39</title>
+    <title>エレベーターゲーム</title>
     <link rel="icon" type="image/png" sizes="32x32" href="./assets/icons/favicon-32.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="./assets/icons/apple-touch-icon.png" />
     <link rel="manifest" href="./site.webmanifest" />
     <link rel="stylesheet" href="./style.css" />
   </head>
   <body>
-    <main class="game-shell">
-      <section class="elevator-view" aria-label="エレベーター">
-        <div class="status-strip">
+    <main class="game-shell" aria-label="エレベーターゲーム">
+      <section class="elevator-view" aria-label="エレベーター表示">
+        <div class="view-status" aria-live="polite">
           <div>
-            <span class="label">現在階</span>
-            <strong id="currentFloor">1</strong>
+            <span>現在階</span>
+            <strong id="currentFloor">1F</strong>
           </div>
           <div>
-            <span class="label">行き先</span>
+            <span>行き先</span>
             <strong id="targetFloor">なし</strong>
           </div>
           <div>
-            <span class="label">状態</span>
+            <span>状態</span>
             <strong id="motionState">待機中</strong>
           </div>
         </div>
 
-        <div class="scene">
+        <div class="floor-hero" id="currentFloorHero">1F</div>
+
+        <div class="scene" aria-label="昇降路">
           <div class="floor-stack" id="floorStack" aria-hidden="true"></div>
           <div class="shaft">
-            <div class="cables"></div>
-            <div class="car" id="car">
-              <div class="car-display" id="carDisplay">1</div>
-              <div class="door left-door"></div>
-              <div class="door right-door"></div>
+            <div class="shaft-rail"></div>
+            <div class="elevator-car" id="car">
+              <div class="car-display">
+                <span id="direction">■</span>
+                <span id="carDisplay">1F</span>
+              </div>
+              <div class="door door-left"></div>
+              <div class="door door-right"></div>
             </div>
           </div>
         </div>
       </section>
 
       <aside class="control-panel" aria-label="操作パネル">
-        <div class="panel-screen">
-          <span id="direction">・</span>
-          <strong id="screenFloor">1</strong>
-          <small id="screenHint">階数ボタンを押してください</small>
+        <div class="panel-screen" aria-live="polite">
+          <span id="screenFloor">1F</span>
+          <span id="screenHint">待機中</span>
+        </div>
+
+        <div class="mode-controls" aria-label="モード切替">
+          <button type="button" class="mode-button is-active" data-mode="normal">39階モード</button>
+          <button type="button" class="mode-button" data-mode="high50">50階モード</button>
         </div>
 
         <div class="door-controls" aria-label="ドア操作">
-          <button id="openDoor" class="wide-button" type="button">開く</button>
-          <button id="closeDoor" class="wide-button" type="button">閉じる</button>
+          <button type="button" id="openDoor" class="command-button">開く</button>
+          <button type="button" id="closeDoor" class="command-button">閉じる</button>
         </div>
 
         <div class="floor-buttons" id="floorButtons" aria-label="階数ボタン"></div>
 
         <div class="utility-controls">
-          <button id="resetElevator" class="reset-button" type="button">1階に戻す</button>
-          <button id="soundToggle" class="sound-toggle is-on" type="button" aria-pressed="true">音声 ON</button>
+          <button type="button" id="resetElevator" class="utility-button">1階に戻す</button>
+          <button type="button" id="soundToggle" class="utility-button" aria-pressed="true">音声ON</button>
         </div>
       </aside>
     </main>

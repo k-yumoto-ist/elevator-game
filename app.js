@@ -1,6 +1,7 @@
 const floors = ["B1", ...Array.from({ length: 39 }, (_, index) => String(index + 1))];
 const doorOpenMs = 1600;
 const doorMoveMs = 320;
+const doorClosingAnnounceLeadMs = 650;
 
 const state = {
   current: 1,
@@ -9,8 +10,11 @@ const state = {
   direction: 0,
   moving: false,
   doorsOpen: false,
+  soundEnabled: true,
   runId: 0,
   doorTimer: null,
+  doorSpeechTimer: null,
+  audioContext: null,
 };
 
 const elements = {
@@ -27,15 +31,95 @@ const elements = {
   openDoor: document.querySelector("#openDoor"),
   closeDoor: document.querySelector("#closeDoor"),
   resetElevator: document.querySelector("#resetElevator"),
+  soundToggle: document.querySelector("#soundToggle"),
 };
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const floorLabel = (index) => floors[index];
 
+function floorSpeechLabel(index) {
+  return index === 0 ? "地下1階" : `${index}階`;
+}
+
+function canUseAudio() {
+  return state.soundEnabled;
+}
+
+function ensureAudioContext() {
+  if (!canUseAudio()) return null;
+  const AudioContext = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContext) return null;
+  if (state.audioContext === null) {
+    state.audioContext = new AudioContext();
+  }
+  if (state.audioContext.state === "suspended") {
+    state.audioContext.resume();
+  }
+  return state.audioContext;
+}
+
+function playTone(frequency, duration, volume = 0.06, delay = 0) {
+  const audioContext = ensureAudioContext();
+  if (!audioContext) return;
+
+  const start = audioContext.currentTime + delay;
+  const oscillator = audioContext.createOscillator();
+  const gain = audioContext.createGain();
+  oscillator.type = "sine";
+  oscillator.frequency.setValueAtTime(frequency, start);
+  gain.gain.setValueAtTime(0.0001, start);
+  gain.gain.exponentialRampToValueAtTime(volume, start + 0.015);
+  gain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
+  oscillator.connect(gain).connect(audioContext.destination);
+  oscillator.start(start);
+  oscillator.stop(start + duration + 0.03);
+}
+
+function playButtonSound() {
+  playTone(880, 0.08, 0.045);
+}
+
+function playArrivalChime() {
+  playTone(660, 0.16, 0.055);
+  playTone(880, 0.2, 0.05, 0.14);
+}
+
+function speak(text) {
+  if (!canUseAudio() || !("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) return;
+  window.speechSynthesis.cancel();
+  const utterance = new window.SpeechSynthesisUtterance(text);
+  utterance.lang = "ja-JP";
+  utterance.rate = 1;
+  utterance.pitch = 1;
+  utterance.volume = 1;
+  window.speechSynthesis.speak(utterance);
+}
+
+function announceTravelStart(direction) {
+  if (direction > 0) {
+    speak("上へまいります");
+  } else if (direction < 0) {
+    speak("下へまいります");
+  }
+}
+
+function announceArrival(floor) {
+  playArrivalChime();
+  window.setTimeout(() => speak(`${floorSpeechLabel(floor)}です`), 260);
+}
+
+function announceDoorClosing() {
+  speak("ドアが閉まります");
+}
+
 function clearDoorTimer() {
   if (state.doorTimer !== null) {
     window.clearTimeout(state.doorTimer);
     state.doorTimer = null;
+  }
+  if (state.doorSpeechTimer !== null) {
+    window.clearTimeout(state.doorSpeechTimer);
+    state.doorSpeechTimer = null;
   }
 }
 
@@ -77,6 +161,10 @@ function pickNextTarget() {
 
 function scheduleAutoClose(runId, continueAfterClose = false) {
   clearDoorTimer();
+  state.doorSpeechTimer = window.setTimeout(() => {
+    if (runId !== state.runId || state.moving || !state.doorsOpen) return;
+    announceDoorClosing();
+  }, Math.max(0, doorOpenMs - doorClosingAnnounceLeadMs));
   state.doorTimer = window.setTimeout(() => {
     if (runId !== state.runId || state.moving) return;
     closeDoors(false);
@@ -89,6 +177,7 @@ function scheduleAutoClose(runId, continueAfterClose = false) {
 function addTarget(floor) {
   const next = Number(floor);
   if (Number.isNaN(next)) return;
+  playButtonSound();
 
   if (next === state.current && !state.moving) {
     state.runId += 1;
@@ -132,6 +221,7 @@ async function startNextTarget(runId = state.runId) {
   clearDoorTimer();
 
   if (state.doorsOpen) {
+    announceDoorClosing();
     closeDoors(false);
     await sleep(doorMoveMs);
     if (activeRunId !== state.runId) return;
@@ -146,6 +236,7 @@ async function startNextTarget(runId = state.runId) {
 
   state.requests.delete(state.target);
   state.direction = Math.sign(state.target - state.current) || state.direction;
+  announceTravelStart(state.direction);
   render();
   moveToTarget(activeRunId);
 }
@@ -162,10 +253,12 @@ async function moveToTarget(runId) {
   }
 
   state.moving = false;
+  const arrivedFloor = state.current;
   state.target = null;
   if (!hasRequests()) {
     state.direction = 0;
   }
+  announceArrival(arrivedFloor);
   openDoors(true, hasRequests());
 }
 
@@ -179,7 +272,10 @@ function openDoors(autoClose = true, continueAfterClose = false) {
 }
 
 function closeDoors(cancelTimer = true) {
-  if (cancelTimer) clearDoorTimer();
+  if (cancelTimer) {
+    announceDoorClosing();
+    clearDoorTimer();
+  }
   state.doorsOpen = false;
   render();
 }
@@ -255,6 +351,9 @@ function render() {
   elements.openDoor.disabled = state.moving || state.doorsOpen;
   elements.closeDoor.disabled = state.moving || !state.doorsOpen;
   elements.resetElevator.disabled = state.moving || (state.current === 1 && !hasRequests());
+  elements.soundToggle.textContent = state.soundEnabled ? "音声 ON" : "音声 OFF";
+  elements.soundToggle.classList.toggle("is-on", state.soundEnabled);
+  elements.soundToggle.setAttribute("aria-pressed", String(state.soundEnabled));
 
   renderFloors();
   renderButtons();
@@ -275,6 +374,13 @@ elements.closeDoor.addEventListener("click", () => {
   }
 });
 elements.resetElevator.addEventListener("click", resetElevator);
+elements.soundToggle.addEventListener("click", () => {
+  state.soundEnabled = !state.soundEnabled;
+  if (!state.soundEnabled && "speechSynthesis" in window) {
+    window.speechSynthesis.cancel();
+  }
+  render();
+});
 window.addEventListener("resize", render);
 
 render();
